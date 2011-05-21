@@ -1,35 +1,35 @@
-" SuperCollider/Vim interaction scripts
-" Copyright 2007 Alex Norman
-" 
-" modified 2010 stephen lumenta
-" Don't worry about the pipes in here. This is all taken care of inside of the
-" ruby script
+"SuperCollider/Vim interaction scripts
+"Copyright 2007 Alex Norman
 "
+"This file is part of SCVIM.
 "
-" This file is part of SCVIM.
-"  
-" SCVIM is free software: you can redistribute it and/or modify
-" it under the terms of the GNU General Public License as published by
-" the Free Software Foundation, either version 3 of the License, or
-" (at your option) any later version.
-" 
-" SCVIM is distributed in the hope that it will be useful,
-" but WITHOUT ANY WARRANTY; without even the implied warranty of
-" MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-" GNU General Public License for more details.
-" 
-" You should have received a copy of the GNU General Public License
-" along with SCVIM.  If not, see <http://www.gnu.org/licenses/>.
- 
+"SCVIM is free software: you can redistribute it and/or modify
+"it under the terms of the GNU General Public License as published by
+"the Free Software Foundation, either version 3 of the License, or
+"(at your option) any later version.
+"
+"SCVIM is distributed in the hope that it will be useful,
+"but WITHOUT ANY WARRANTY; without even the implied warranty of
+"MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+"GNU General Public License for more details.
+"
+"You should have received a copy of the GNU General Public License
+"along with SCVIM.  If not, see <http://www.gnu.org/licenses/>.
 
-" source the syntax file as it can change
-" so $SCVIM_DIR/syntax/supercollider.vim
+"au VimLeave
+
+"if exists("$SCVIM_DIR") == 0
+"	echo "$SCVIM_DIR must be defined for SCVIM to work"
+"	finish
+"endif
+
+
+"source the syntax file as it can change
+"so $SCVIM_DIR/syntax/supercollider.vim
 runtime! syntax/supercollider.vim
 
-" ========================================================================================
-
 if exists("loaded_scvim") || &cp
-   finish
+  finish
 endif
 let loaded_scvim = 1
 
@@ -42,41 +42,55 @@ else
 	let $SCVIM_CACHE_DIR = s:scvim_cache_dir
 endif
 
+"source the scvimrc file if it exists
+"if filereadable($HOME . "/.scvimrc")
+"	source $HOME/.scvimrc
+"end
+
 "add the cache dir to 
 set runtimepath+=$SCVIM_CACHE_DIR
 
 if exists("g:sclangKillOnExit")
 	let s:sclangKillOnExit = g:sclangKillOnExit
 else
-	let s:sclangKillOnExit = 0
+	let s:sclangKillOnExit = 1
 endif
+
+if exists("g:sclangPipeLoc")
+	let s:sclangPipeLoc = g:sclangPipeLoc
+else
+	let s:sclangPipeLoc = "/tmp/sclang-pipe"
+endif
+let $SCVIM_PIPE_LOC = s:sclangPipeLoc
+
+if exists("g:sclangPipeAppPidLoc")
+	let s:sclangPipeAppPidLoc = g:sclangPipeAppPidLoc
+else
+	let s:sclangPipeAppPidLoc = "/tmp/sclangpipe_app-pid"
+endif
+let $SCVIM_PIPE_PID_LOC = s:sclangPipeAppPidLoc
 
 if exists("g:sclangTerm")
 	let s:sclangTerm = g:sclangTerm
 else
-	let s:sclangTerm = "open -a Terminal.app"
+	let s:sclangTerm = "xterm -e"
 endif
 
 if exists("g:sclangPipeApp")
 	let s:sclangPipeApp	= g:sclangPipeApp
 else
-	let s:sclangPipeApp	= "~/.vim/bundle/supercollider/bin/start_pipe"
+	let s:sclangPipeApp	= "~/.vim/bundle/supercollider/bin/sclangpipe_app"
 endif
 
-if exists("g:sclangDispatcher")
-	let s:sclangDispatcher = g:sclangDispatcher
-else
-	let s:sclangDispatcher = "~/.vim/bundle/supercollider/bin/sc_dispatcher"
-endif
+"function SClangRunning()
+"	if s:sclang_pid != 0 && `pidof "#{$sclangsclangPipeApp_no_quotes}"`.chomp != ""
+"		return true
+"	else
+"		$sclang_pid = 0
+"		return false
+"	end
+"end
 
-if !exists("loaded_kill_sclang")
-	if s:sclangKillOnExit
-		au VimLeave * call SClangKill()
-	endif
-	let loaded_kill_sclang = 1
-endif
-
-" ========================================================================================
 
 function! FindOuterMostBlock()
 	"search backwards for parens dont wrap
@@ -151,47 +165,84 @@ function! FindOuterMostBlock()
 	 return [l:range_s, l:range_e]
 endfunction
 
-" ========================================================================================
 
+"this causes the sclang pipe / terminal app to be killed when you exit vim, if you don't
+"want that to happen then just comment this out
+if !exists("loaded_kill_sclang")
+	if s:sclangKillOnExit
+		au VimLeave * call SClangKill()
+	endif
+	let loaded_kill_sclang = 1
+endif
 
-function SCFormatText(text)
+"the vim version of SendToSC
+function SendToSC(text)
 	let l:text = substitute(a:text, '\', '\\\\', 'g')
 	let l:text = substitute(l:text, '"', '\\"', 'g')
-  let l:text = '"' . l:text .'"'
-
-  return l:text
+	let l:cmd = system('echo "' . l:text . '" >> ' . s:sclangPipeLoc)
+	"let l:cmd = system('echo "' . l:text . '" >> /tmp/test')
 endfunction
 
-function SendToSC(text)
-  let l:text = SCFormatText(a:text)
-
-  call system(s:sclangDispatcher . " -i " . l:text)
-  redraw!
+function SendLineToSC(linenum)
+	let cmd = a:linenum . "w! >> " . s:sclangPipeLoc
+	silent exe cmd
+	"let cmd = a:linenum . "w! >> /tmp/test" 
+	"silent exe cmd
 endfunction
 
-function SendToSCSilent(text)
-  let l:text = SCFormatText(a:text)
-
-  call system(s:sclangDispatcher . " -s " . l:text)
-  redraw!
+function! SClang_send()
+	let cmd = ".w! >> " . s:sclangPipeLoc
+	exe cmd
+	if line(".") == a:lastline
+		call SendToSC('')
+		"redraw!
+	endif
 endfunction
 
-" a variable to hold the buffer content
-let s:cmdBuf = ""
-
-function SClang_send()
-  let currentline = line(".")
-  let s:cmdBuf = s:cmdBuf . getline(currentline) . "\n"
-  
-  if(a:lastline == currentline)
-    call SendToSC(s:cmdBuf)
-
-    " clear the buffer again
-    let s:cmdBuf = ""
-  endif
+function SClangStart()
+	if !filewritable(s:sclangPipeAppPidLoc)
+                if $TERM[0:5] == "screen"
+                        call system("screen -D -R -X split; screen -D -R -X focus; screen -D -R -X screen " . s:sclangPipeApp . "; screen -D -R -X focus")
+                else
+                        call system(s:sclangTerm . " " . s:sclangPipeApp . "&")
+                endif
+	else
+		throw s:sclangPipeAppPidLoc . " exists, is " . s:sclangPipeApp . " running?  If not try deleting " . s:sclangPipeAppPidLoc
+	endif
 endfunction
 
-function SClang_block()
+function SClangKill()
+	if filewritable(s:sclangPipeAppPidLoc)
+		call SendToSC("Server.quitAll;")
+		:sleep 10m
+		call system("kill `cat " . s:sclangPipeAppPidLoc . "` && rm " . s:sclangPipeAppPidLoc . " && rm " . s:sclangPipeLoc)
+	end
+endfunction
+
+function SClangRestart()
+	if filewritable(s:sclangPipeAppPidLoc)
+		call system("kill -HUP `cat " . s:sclangPipeAppPidLoc . "`")
+	else
+		call SClangStart()
+	end
+endfunction
+
+function SClang_free(server)
+	call SendToSC('s.freeAll;')
+	redraw!
+endfunction
+
+function SClang_thisProcess_stop()
+	call SendToSC('thisProcess.stop;')
+	redraw!
+endfunction
+
+function SClang_TempoClock_clear()
+	call SendToSC('TempoClock.default.clear;')
+	redraw!
+endfunction
+
+function! SClang_block()
 	let [blkstart,blkend] = FindOuterMostBlock()
 	"blkstart[0],blkend[0] call SClang_send()
 	"these next lines are just a hack, how can i do the above??
@@ -200,63 +251,84 @@ function SClang_block()
 	let l:origcol = col(".")
 	exe cmd
 	call cursor(l:origline,l:origcol)
+	
+	""if the range is just one line
+	"if blkstart[0] == blkend[0]
+	"	"XXX call SendToSC(strpart(getline(blkstart[0]),blkstart[1] - 1, (blkend[1] - blkstart[1] + 1)))
+	"	call SendLineToSC(blkstart[0])
+	"else
+	"	let linen = blkstart[0] - 1
+	"	"send the first line as it might not be a full line
+	"	"XXX let line = getline(linen)
+	"	"XXX call SendToSC(strpart(line, blkstart[1] - 1))
+	"	call SendLineToSC(linen)
+	"	let linen += 1
+	"	let endlinen = blkend[0]
+	"	while linen < endlinen
+	"		"XXX call SendToSC(getline(linen))
+	"		call SendLineToSC(linen)
+	"		let linen += 1
+	"	endwhile
+	"	"send the last line as it might not be a full line
+	"	"XXX let line = getline(endlinen)
+	"	"XXX call SendToSC(strpart(line,0,blkend[1]))
+	"	call SendLineToSC(endlinen)
+	"endif
+	"call SendToSC('')
 endfunction
-
-" ========================================================================================
-
-function SClangStart()
-  call system(s:sclangTerm . " " . s:sclangPipeApp)
-endfunction
-
-function SClangKill()
-  call system(s:sclangDispatcher . " -q")
-endfunction
-
-function SClangRestart()
-  echo s:sclangDispatcher
-  call system(s:sclangDispatcher . " -k")
-  call system(s:sclangDispatcher . " -s ''")
-  redraw!
-endfunction
-
-function SClang_thisProcess_stop()
-	call system(s:sclangDispatcher . ' -s thisProcess.stop;')
-	redraw!
-endfunction
-
-function SClang_free(server)
-	call SendToSC('s.freeAll;')
-	redraw!
-endfunction
-
-function SClang_TempoClock_clear()
-	call SendToSC('TempoClock.default.clear;')
-	redraw!
-endfunction
-
-" Introspection and Help Files
 
 function SCdef(subject)
-  call SendToSCSilent('SCVim.openClass("' . a:subject . '");')
+	let l:tagfile = s:scvim_cache_dir . "/TAGS_SCDEF"
+	let l:tagdest = s:scvim_cache_dir . "/doc/tags"
+
+	if !filereadable(l:tagfile)
+		echo "definition tag cache does not exist, you must run SCVim.updateCaches in supercollider"
+		let l:dontcare = system("echo 'SC:SCVim	SCVim.scd	/^' > " . l:tagdest)
+		exe "help SC:SCVim"
+	else
+		let l:dontcare = system("grep SCdef:" . a:subject . " " . l:tagfile . " > " . l:tagdest)
+		exe "help SCdef:" . a:subject
+	end
 endfun
 
 function SChelp(subject)
-  call SendToSCSilent('SCVim.findHelp("' . a:subject . '");')
+	let l:tagfile = s:scvim_cache_dir . "/doc/TAGS_HELP"
+	let l:tagdest = s:scvim_cache_dir . "/doc/tags"
+	if !filereadable(l:tagfile)
+		echo "help tag cache does not exist, you must run SCVim.updateHelpCache in supercollider in order have help docs"
+		let l:dontcare = system("echo 'SC:SCVim	SCVim.scd	/^' > $SCVIM_CACHE_DIR/doc/tags")
+		exe "help SC:SCVim"
+		return
+	end
+
+	"the keybindings won't find * but will find ** for some reason
+	if a:subject == ""
+		let l:dontcare = system("grep \"SC:Help\" " . l:tagfile . " > " . l:tagdest)
+		exe "help SC:Help"
+	elseif a:subject == "*"
+		let l:dontcare = system("grep \"SC:\\*\" " . l:tagfile . " > " . l:tagdest)
+		exe "help SC:\*" . a:subject
+	elseif a:subject == "**"
+		let l:dontcare = system("grep \"SC:\\*\\*\" " . l:tagfile . " > " . l:tagdest)
+		exe "help SC:\*\*" . a:subject
+	else
+		let l:dontcare = system("grep SC:\"" . a:subject . "\" " . l:tagfile . " > " . l:tagdest)
+		exe "help SC:" . a:subject
+	endif
 endfun
 
-function SCreference(subject)
-  call SendToSCSilent('SCVim.methodReferences("' . a:subject . '");')
+function ListSCObjects(A,L,P)
+	return system("cat $SCVIM_CACHE_DIR/sc_object_completion")
 endfun
 
-function SCimplementation(subject)
-  call SendToSCSilent('SCVim.methodTemplates("' . a:subject . '");')
+function ListSCHelpItems(A,L,P)
+	return system("cat $SCVIM_CACHE_DIR/doc/sc_help_completion")
 endfun
 
-function SCfindMethods(subject)
-  call SendToSCSilent('SCVim.displayMethods("' . a:subject . '");')
-endfun
 
 "custom commands (SChelp,SCdef,SClangfree)
+com -complete=custom,ListSCHelpItems -nargs=? SChelp call SChelp("<args>")
+com -complete=custom,ListSCObjects -nargs=1 SCdef call SCdef("<args>")
 com -nargs=1 SClangfree call SClang_free("<args>")
 com -nargs=0 SClangStart call SClangStart()
 com -nargs=0 SClangKill call SClangKill()
